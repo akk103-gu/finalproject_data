@@ -1,487 +1,536 @@
 ---
-title: "final"
-format: html
+title: "Untitled"
+format:
+  html:
+    embed-resources: true
 editor: visual
 ---
 
-## Examining the effects of paid family leave policy on unemployment: A case study of California
+## Introduction
 
-### Introduction
+#### Privately funded vs. state subsidized leave policy
 
-**Privately funded and unpaid leave vs. state-subsidized leave**\
 Paid leave programs without state support often create more problems than they solve. In 2001, Korea introduced a paid maternal leave policy as an incentive for young women to enter full-time professional work. In practice, the firms themselves and private insurance companies bore the cost, so firms who could not afford to compensate their workers often opted out. The concurrent financial crisis in East Asia pressured Korean women into full-time professional work, but mothers without insurance or an employer willing to pay their salary had to finance their own leave (Li, 2014).  The United States operates on a similar voluntary basis, with a federal unpaid leave program and only 16% of private sector employees having access to paid family leave (Donovan, 2019). Workplace protections for women implemented in Taiwan  which included mandated paid maternal leave, preceded reductions in the employment rate and wages of young women, as employers began to view women of child-rearing age as financial liabilities (Lai, Zu-Cheng, & Sarkar, 2016). In Colombia, the introduction of a new law extending the mandatory unpaid maternal leave period from 12 to 14 weeks preceded increases in inactivity rates, informal labor, and self-employment among women of child bearing age (Uribe et al., 2019).  In cases where the firm is solely responsible for compensating the mother and hiring replacement workers, employers often develop discriminatory attitudes towards women during the hiring and promotion process (Espino & Salvador, 2016).
 
 Though the economic outcomes of state-subsidized leave is debatable, the positive health outcomes are well-documented.  In contrast to Korea, where the post-reform period saw decreases in the fertility rate (Li, 2014), a study of families in Iceland, Norway, and Sweden (where the state fully subsidizes leave) found that usage of paternal leave correlated with a greater probability of rearing a second child (Duvander et al., 2019).  Leave expansions in OECD countries saw significant decreases in infant and neonatal mortality rates, as well as fatalities from measles (Khan et al, 2020). Citizens in countries with more generous leave programs even tended to have more favorable attitudes towards women’s rights and economic independence (Givati & Troiano, 2012). A recent NBER cost-benefit analysis simulated the effects of a 4-week and 12-week long paid leave program in the United States, with conservative estimates returning around \$8,000 in societal benefits for every \$1,000 spent (Wang et al, 2024). However, existing data on state-subsidized family leave in Norway saw no significant crowding out of private childcare services (that is, beneficial reductions in private spending as government spending increases), minimal changes in labor market participation and children’s health and wellbeing, and possible upwards transfers of wealth, as middle and upper class families are better equipped to take advantage of time off from work (Dahl, Gordon, 2016).
 
 Generous family leave policy is not an immediate cure for social issues and high employment, but can create positive outcomes for the health and well-being of families. Today, state governments are re-evaluating their positions in relation to family leave policy, mediating between the private and public sectors. For example, the “Big Beautiful Bill” proposes tax credits for private firms that offer employees paid leave (which also indicates bipartisan support for family leave in the U.S.).
 
-**Paid leave policy in California**\
+#### Paid leave policy in California
+
 The U.S. lags behind other democratic/industrialized nations in formalized leave policy, with existing programs existing mostly at the state level. The last federal-level family leave program was the 1993 Family Medical Leave Act, which provides 12 weeks of unpaid, job-protected leave for new mothers. As of December, 2025, 13 states have enacted versions of paid leave programs, in most of which the state partially or fully replaces wages (the exception being New York, where leave is covered by employers who purchase private insurance through a state-regulated market). 10 states have a voluntary policy, in which coverage is also provided through a private insurance market (Bipartisan Policy Center, 2025).
 
 In 2002, the state of California implemented a family leave policy which provided 6 weeks of leave with 55% wage replacement for new mothers. While maternal health outcomes did improve and mothers' participation in the labor market increased (that is, women disengaged from the labor market opted in), young women also saw increased rates of unemployment (defined as seeking employment, but unable to find employment). As many as 75,000 young women entered the workforce, but women as a whole experienced longer and more frequent periods of unemployment (Das & Polachek, 2014). If true, this report supports previous findings that as protections for mothers increase, the labor market becomes over saturated and employers begin to view mothers as financial liabilities. The intent of the present study is to replicate the findings observed in Das & Polachek, 2014, in order to better understand the relationship between leave policy and the labor market.
 
-### Importing and organizing the data
+## Importing and cleaning the data
 
 Data was imported from the IPUMS CPS website. The sample was comprised of adult women aged 24-44 from California, Florida, Pennsylvania, and Texas, surveyed from January of 1999 through December of 2009. Relevant attributes included employment status, labor force participation, and state. Florida, Pennsylvania, and Texas were included as control populations.
 
 ```{r}
-#| label: setup
-#| message: false
-#| warning: false
-
-# Load required packages
+# Loading the data and relevant libraries
 library(tidyverse)
-library(lubridate)
 library(tseries)
 library(forecast)
-library(boot)
 library(car)
+library(boot)
 library(ggplot2)
-library(gridExtra)
-```
+library(ipumsr)
+dat_file <- "cps_00009.dat"
+xml_file <- "cps_00009.xml"
+data <- read_ipums_micro(
+   ddi = xml_file,
+   data_file = dat_file
+ )
+head(data) 
+data_sample <- head(data, 100)
+# write.csv(data, "ipums_cps_data.csv", row.names = FALSE)
+# write.csv(data_sample, "ipums_cps_data_SAMPLE.csv", row.names = FALSE)
 
-```{r}
-#| label: load-data
-
-# Load IPUMS CPS data
-ipums_data <- read.csv("california_women_25_44_filtered.csv")
-head(ipums_data)
-```
-
-```{r}
-#| label: data-preparation
-
-# Create unemployment and employment indicators
-df <- ipums_data %>%
+# Filter for women aged 24-44 in target states
+analysis_data <- data %>%
+  filter(SEX == 2,  # Female
+         AGE >= 24, AGE <= 44,
+         STATEFIP %in% c(6, 42, 51)) %>%  # CA, PA, VA
   mutate(
-    unemployed = ifelse(EMPSTAT == 21 | EMPSTAT == 22, 1, 0),
-    in_labor_force = ifelse(LABFORCE == 2, 1, 0),
-    employed = ifelse(EMPSTAT == 10 | EMPSTAT == 12, 1, 0),
     state_name = case_when(
       STATEFIP == 6 ~ "California",
-      STATEFIP == 48 ~ "Texas",
-      STATEFIP == 12 ~ "Florida",
       STATEFIP == 42 ~ "Pennsylvania",
-      TRUE ~ "Other"
+      STATEFIP == 51 ~ "Virginia"
     ),
-    policy_period = ifelse(YEAR >= 2004 & MONTH >= 7, "Post", "Pre"),
-    date = as.Date(paste(YEAR, MONTH, "01", sep = "-"))
+    treatment = ifelse(STATEFIP == 6, 1, 0),  # CA = treatment
+    post_policy = ifelse(YEAR >= 2004, 1, 0),  # Post-2004 = after policy
+    unemployed = ifelse(EMPSTAT == 21 | EMPSTAT == 22, 1, 0),  # Unemployed
+    in_labor_force = ifelse(LABFORCE == 2, 1, 0),  # In labor force
+    year_month = as.Date(paste(YEAR, MONTH, "01", sep = "-"))
   )
 
-# Check the data structure
-glimpse(df)
-```
-
-```{r}
-#| label: monthly-unemployment-rates
-
-# Calculate monthly unemployment rate by state using survey weights
-monthly_unemp <- df %>%
-  filter(in_labor_force == 1) %>%
-  group_by(state_name, YEAR, MONTH, date) %>%
+# Each row in the data set represents an individual survey respondent. Thus, we need to calculate the unemployment rate by taking the ratio of employed respondents to the total number of respondents in the workforce.
+# Calculate monthly unemployment rates by state
+monthly_unemp <- analysis_data %>%
+  group_by(YEAR, MONTH, state_name, treatment, post_policy) %>%
   summarise(
-    unemp_rate = weighted.mean(unemployed, w = WTFINL, na.rm = TRUE) * 100,
-    lfpr = mean(in_labor_force, na.rm = TRUE) * 100,
-    emp_rate = weighted.mean(employed, w = WTFINL, na.rm = TRUE) * 100,
+    unemp_rate = sum(unemployed * WTFINL) / sum(in_labor_force * WTFINL),
     n = n(),
     .groups = "drop"
-  )
+  ) %>%
+  mutate(year_month = as.Date(paste(YEAR, MONTH, "01", sep = "-")))
+head(monthly_unemp,100)
+```
 
-# Separate California and control states
-ca_data <- monthly_unemp %>% 
-  filter(state_name == "California") %>%
-  mutate(policy = ifelse(date >= as.Date("2004-07-01"), 1, 0))
+### Part 1: T-tests
 
-tx_data <- monthly_unemp %>% filter(state_name == "Texas")
-fl_data <- monthly_unemp %>% filter(state_name == "Florida")
+T-tests allow us to demonstrate significant changes in the unemployment rate before, and after the implementation of the policy in 2004 within the state of California. However, this alone won't tell us anything specific about the policy's effects on unemployment, so we also implement t-tests in order to demonstrate that the change in rates in California was significantly different than our control states.
+
+```{r}
+# Application: Compare pre/post unemployment rates within California
+ca_data <- monthly_unemp %>% filter(state_name == "California")
+ca_pre <- ca_data %>% filter(post_policy == 0) %>% pull(unemp_rate)  # 1999-2003
+ca_post <- ca_data %>% filter(post_policy == 1) %>% pull(unemp_rate)  # 2004-2009
+
+va_data <- monthly_unemp %>% filter(state_name == "Virginia")
+va_pre <- va_data %>% filter(post_policy == 0) %>% pull(unemp_rate)  # 1999-2003
+va_post <- va_data %>% filter(post_policy == 1) %>% pull(unemp_rate)  # 2004-2009
+
 pa_data <- monthly_unemp %>% filter(state_name == "Pennsylvania")
+pa_pre <- pa_data %>% filter(post_policy == 0) %>% pull(unemp_rate)  # 1999-2003
+pa_post <- pa_data %>% filter(post_policy == 1) %>% pull(unemp_rate)  # 2004-2009
 
-head(ca_data)
+# Check normality assumption
+print("=== NORMALITY TESTS ===")
+print("Pre-policy (1999-2003):")
+shapiro_pre <- shapiro.test(ca_pre)
+print(shapiro_pre)
+
+print("Post-policy (2004-2009):")
+shapiro_post <- shapiro.test(ca_post)
+print(shapiro_post)
+
+# Check equal variance assumption
+print("=== VARIANCE TEST ===")
+var_test <- var.test(ca_pre, ca_post)
+print(var_test)
+var_test_pa <- var.test(pa_pre, pa_post)
+print(var_test_pa)
+var_test_va <- var.test(va_pre, va_post)
+print(var_test_va)
+
+# Independent samples t-test (Welch's - doesn't assume equal variances)
+t_test_result <- t.test(ca_post, ca_pre, var.equal = FALSE)
+print("=== T-TEST: CA unemployment pre vs post policy (2004) ===")
+print(t_test_result)
+
+# Effect size (Cohen's d) - more robust calculation
+pooled_sd <- sqrt(((length(ca_pre) - 1) * var(ca_pre) + 
+                   (length(ca_post) - 1) * var(ca_post)) / 
+                  (length(ca_pre) + length(ca_post) - 2))
+cohens_d <- (mean(ca_post) - mean(ca_pre)) / pooled_sd
+print(paste("Cohen's d:", round(cohens_d, 3)))
+
 ```
 
-### Descriptive Statistics
+Normality tests indicate that within the state of California, the employment rate was approximately normal before the 2004 period. However, the period from 2004-2009 was not normally distributed. Additionally, the pre and post periods had unequal variances, violating normality assumptions.
+
+As stated above, these analyses are only within the state of California, and cannot account for national trends, such as large financial crises (e.g., The Great Recession in 2008).
 
 ```{r}
-#| label: descriptive-stats
-
-# Split pre and post policy periods
-pre_policy <- ca_data %>% filter(date < as.Date("2004-07-01"))
-post_policy <- ca_data %>% filter(date >= as.Date("2004-07-01"))
-
-# Summary statistics
-desc_stats <- ca_data %>%
-  group_by(policy) %>%
-  summarise(
-    n_months = n(),
-    mean_unemp = mean(unemp_rate),
-    sd_unemp = sd(unemp_rate),
-    min_unemp = min(unemp_rate),
-    max_unemp = max(unemp_rate),
-    mean_lfpr = mean(lfpr),
-    mean_emp = mean(emp_rate)
-  )
-
-print(desc_stats)
+mann_whitney <- wilcox.test(ca_post, ca_pre, alternative = "two.sided")
+print("=== MANN-WHITNEY U TEST (non-parametric alternative) ===")
+print(mann_whitney)
 ```
 
-```{r}
-#| label: fig-unemployment-timeline
-#| fig-cap: "Unemployment Rate for Young Women in California (1999-2009)"
+Interestingly, when we observe the same data using non-parametric methods, we find no significant differences in the unemployment rate pre and post policy implementation. The more informative test in this case would be the difference-in-difference test, which identifies significant differences in this change between states, rather within a single state.
 
-# Visualize unemployment rate over time
-ggplot(ca_data, aes(x = date, y = unemp_rate)) +
-  geom_line(color = "blue", size = 1) +
-  geom_vline(xintercept = as.Date("2004-07-01"), 
-             linetype = "dashed", color = "red", size = 1) +
-  annotate("text", x = as.Date("2004-07-01"), y = max(ca_data$unemp_rate),
-           label = "CA PFL Implementation", vjust = -0.5, hjust = -0.1) +
-  labs(title = "Unemployment Rate for Young Women in California",
-       x = "Date", y = "Unemployment Rate (%)") +
+```{r}
+# Paired approach: Compare CA vs control states (difference-in-differences)
+# Calculate average control state unemployment
+control_avg <- monthly_unemp %>%
+  filter(treatment == 0) %>%
+  group_by(YEAR, MONTH) %>%
+  summarise(control_rate = mean(unemp_rate), .groups = "drop")
+
+ca_control_comparison <- ca_data %>%
+  left_join(control_avg, by = c("YEAR", "MONTH")) %>%
+  mutate(diff = unemp_rate - control_rate)
+
+diff_pre <- ca_control_comparison %>% 
+  filter(post_policy == 0) %>% pull(diff)  # 1999-2003
+diff_post <- ca_control_comparison %>% 
+  filter(post_policy == 1) %>% pull(diff)  # 2004-2009
+
+t_test_diff <- t.test(diff_post, diff_pre)
+print("=== T-TEST: CA-Control difference, pre vs post 2004 ===")
+print(t_test_diff)
+```
+
+The two-sample t-test was unable to identify a significant difference between trends in the unemployment rates between states. This is a notable finding, and actually contradicts the findings in Das & Polachek (2014), who observed an overall decrease in the unemployment rate.
+
+```{r}
+# Application: Test association between state and unemployment status
+# Create contingency table using years immediately before/after policy
+chi_data <- analysis_data %>%
+  filter(YEAR %in% c(2003, 2005)) %>%  # Years immediately before/after 2004
+  mutate(period = ifelse(YEAR == 2003, "Pre", "Post"))
+
+contingency_table <- table(
+  chi_data$state_name,
+  chi_data$unemployed
+)
+
+chi_test <- chisq.test(contingency_table)
+print("=== CHI-SQUARE TEST: State vs Unemployment Status (2003 vs 2005) ===")
+print(chi_test)
+print("Expected frequencies:")
+print(chi_test$expected)
+
+# Post-hoc analysis: Compare CA specifically
+ca_vs_others <- table(
+  ifelse(chi_data$state_name == "California", "CA", "Control"),
+  chi_data$unemployed
+)
+chi_test_ca <- chisq.test(ca_vs_others)
+print("=== CHI-SQUARE: CA vs Control States ===")
+print(chi_test_ca)
+```
+
+These tests do indicate significant differences in the unemployment between states. However, this does not indicate change across time, and only identifies broad differences in unemployment rates overall, which are to be expected. This is the equivalent to saying "the unemployment rate, considering all factors, differs between states" – which is true, but nonspecific and not immediately relevant to our research questions.
+
+### Part 2: Bootstrap methods
+
+The results in part 1 indicate significant changes in the unemployment rate in both California and the two control states, but no significant differences in the changing rates between the states. The Mann-Whitney test, somewhat counterintuitively, indicates no significant difference in the unemployment rate within the state of California. However, the change detected in the t-test was likely due to a large spike in unemployment from 2008-2009, while the data from 2004-2007 was more normally distributed.
+
+Running bootstrap DiD tests will help us confirm our findings.
+
+```{r}
+# Application: Bootstrap confidence intervals for difference-in-differences
+# Create difference-in-differences statistic
+
+did_statistic <- function(data, indices) {
+  d <- data[indices, ]
+  
+  # CA post-policy mean (2004-2009)
+  ca_post_mean <- mean(d$unemp_rate[d$treatment == 1 & d$post_policy == 1], na.rm = TRUE)
+  # CA pre-policy mean (1999-2003)
+  ca_pre_mean <- mean(d$unemp_rate[d$treatment == 1 & d$post_policy == 0], na.rm = TRUE)
+  # Control post-policy mean
+  ctrl_post_mean <- mean(d$unemp_rate[d$treatment == 0 & d$post_policy == 1], na.rm = TRUE)
+  # Control pre-policy mean
+  ctrl_pre_mean <- mean(d$unemp_rate[d$treatment == 0 & d$post_policy == 0], na.rm = TRUE)
+  
+  # Difference-in-differences
+  did <- (ca_post_mean - ca_pre_mean) - (ctrl_post_mean - ctrl_pre_mean)
+  
+  # Return 0 if any component is NA or infinite
+  if (is.na(did) || is.infinite(did)) {
+    return(0)
+  }
+  
+  return(did)
+}
+
+# Check data before bootstrap
+print("=== DATA CHECK BEFORE BOOTSTRAP ===")
+print("Sample sizes by group:")
+print(table(monthly_unemp$treatment, monthly_unemp$post_policy))
+
+print("Mean unemployment by group:")
+group_means <- monthly_unemp %>%
+  group_by(treatment, post_policy) %>%
+  summarise(mean_unemp = mean(unemp_rate, na.rm = TRUE),
+            n = n(),
+            .groups = "drop")
+print(group_means)
+
+# Calculate DiD manually to verify
+ca_post <- group_means$mean_unemp[group_means$treatment == 1 & group_means$post_policy == 1]
+ca_pre <- group_means$mean_unemp[group_means$treatment == 1 & group_means$post_policy == 0]
+ctrl_post <- group_means$mean_unemp[group_means$treatment == 0 & group_means$post_policy == 1]
+ctrl_pre <- group_means$mean_unemp[group_means$treatment == 0 & group_means$post_policy == 0]
+
+manual_did <- (ca_post - ca_pre) - (ctrl_post - ctrl_pre)
+print(paste("Manual DiD calculation:", round(manual_did, 6)))
+
+# Run bootstrap
+set.seed(123)
+boot_results <- boot(data = monthly_unemp, 
+                     statistic = did_statistic, 
+                     R = 10000)
+
+print("=== BOOTSTRAP DIFFERENCE-IN-DIFFERENCES ESTIMATE ===")
+print("Policy cutoff: 2004")
+print(boot_results)
+
+# Calculate confidence intervals
+boot_ci <- boot.ci(boot_results, type = c("norm", "basic", "perc", "bca"))
+print(boot_ci)
+
+# Visualization
+boot_df <- data.frame(did = boot_results$t)
+ggplot(boot_df, aes(x = did)) +
+  geom_histogram(bins = 50, fill = "steelblue", alpha = 0.7) +
+  geom_vline(xintercept = boot_results$t0, color = "red", linetype = "dashed", linewidth = 1) +
+  geom_vline(xintercept = 0, color = "black", linetype = "dotted") +
+  labs(title = "Bootstrap Distribution of DiD Estimate",
+       subtitle = "Policy Implementation: 2004",
+       x = "Difference-in-Differences Effect", y = "Frequency") +
   theme_minimal()
 ```
 
-```{r}
-#| label: fig-state-comparison
-#| fig-cap: "Unemployment Comparison: California vs Control States"
+Our bootstrapped DiD analysis supports the findings from our two-sample t-test. The DiD point estimate of -0.0007 indicates a trivial difference between California's change in unemployment relative to other states.
 
-# Compare California vs control states
-ggplot(monthly_unemp, aes(x = date, y = unemp_rate, color = state_name)) +
-  geom_line(size = 1) +
-  geom_vline(xintercept = as.Date("2004-07-01"), 
-             linetype = "dashed", color = "gray40") +
-  labs(title = "Unemployment Comparison: California vs Control States",
-       x = "Date", y = "Unemployment Rate (%)", color = "State") +
-  theme_minimal() +
-  theme(legend.position = "bottom")
-```
-
-### Assumption Testing
+### ANOVA
 
 ```{r}
-#| label: normality-tests
-
-# Test for normality (Shapiro-Wilk test)
-shapiro_pre <- shapiro.test(pre_policy$unemp_rate)
-shapiro_post <- shapiro.test(post_policy$unemp_rate)
-
-cat("Pre-policy normality test:\n")
-print(shapiro_pre)
-cat("\nPost-policy normality test:\n")
-print(shapiro_post)
-```
-
-```{r}
-#| label: fig-qq-plots
-#| fig-cap: "Q-Q Plots for Normality Assessment"
-
-# Q-Q plots for visual normality check
-par(mfrow = c(1, 2))
-qqnorm(pre_policy$unemp_rate, main = "Q-Q Plot: Pre-Policy")
-qqline(pre_policy$unemp_rate)
-qqnorm(post_policy$unemp_rate, main = "Q-Q Plot: Post-Policy")
-qqline(post_policy$unemp_rate)
-```
-
-```{r}
-#| label: variance-test
-
-# Test for equal variances (Levene's test)
-levene_result <- leveneTest(unemp_rate ~ as.factor(policy), data = ca_data)
+# Application: Compare unemployment rates across all three states post-policy
+post_policy_data <- monthly_unemp %>% filter(post_policy == 1)  # 2004-2009
+pre_policy_data <- monthly_unemp %>% filter(post_policy == 0)  # 2004-2009
+# Check assumptions
+# 1. Normality by group
+print("=== NORMALITY TESTS BY STATE (Post-policy period) ===")
+by(post_policy_data$unemp_rate, post_policy_data$state_name, shapiro.test)
+# 1. Normality by group
+print("=== NORMALITY TESTS BY STATE (Post-policy period) ===")
+by(pre_policy_data$unemp_rate, pre_policy_data$state_name, shapiro.test)
+# 2. Homogeneity of variance (Levene's test)
+print("=== LEVENE'S TEST (Homogeneity of Variance) ===")
+levene_result <- leveneTest(unemp_rate ~ state_name, data = post_policy_data)
 print(levene_result)
+
+# One-way ANOVA
+anova_model <- aov(unemp_rate ~ state_name, data = post_policy_data)
+print("=== ONE-WAY ANOVA: Unemployment rates across states (2004-2009) ===")
+summary(anova_model)
+
+# Post-hoc tests (Tukey HSD)
+tukey_results <- TukeyHSD(anova_model)
+print("=== TUKEY HSD POST-HOC TESTS ===")
+print(tukey_results)
+
+# If assumptions violated, use Kruskal-Wallis (non-parametric alternative)
+kruskal_test <- kruskal.test(unemp_rate ~ state_name, 
+                             data = post_policy_data)
+print("=== KRUSKAL-WALLIS TEST (non-parametric alternative) ===")
+print(kruskal_test)
+
+# Two-way ANOVA: State × Period interaction (KEY DiD TEST)
+anova_2way <- aov(unemp_rate ~ state_name * factor(post_policy), 
+                  data = monthly_unemp)
+print("=== TWO-WAY ANOVA: State × Policy Period (2004 cutoff) ===")
+print("The interaction term tests the Difference-in-Differences effect")
+summary(anova_2way)
 ```
 
-### Hypothesis Testing
+The ANOVA tests further support our findings, showing no significant differences in unemployment trajectories before and after 2004.
+
+### Time series analysis
 
 ```{r}
-#| label: ttest-pre-post
-
-# T-test comparing pre vs post policy unemployment rates
-t_result <- t.test(pre_policy$unemp_rate, post_policy$unemp_rate, var.equal = FALSE)
-print(t_result)
-
-# Calculate effect size (Cohen's d)
-mean_diff <- mean(post_policy$unemp_rate) - mean(pre_policy$unemp_rate)
-pooled_sd <- sqrt((sd(pre_policy$unemp_rate)^2 + sd(post_policy$unemp_rate)^2) / 2)
-cohens_d <- mean_diff / pooled_sd
-
-cat("\nMean difference:", round(mean_diff, 3), "%\n")
-cat("Cohen's d:", round(cohens_d, 3), "\n")
-```
-
-```{r}
-#| label: diff-in-diff
-
-# Difference-in-Differences analysis (CA vs TX)
-ca_pre <- ca_data %>% filter(policy == 0) %>% pull(unemp_rate)
-ca_post <- ca_data %>% filter(policy == 1) %>% pull(unemp_rate)
-tx_pre <- tx_data %>% filter(date < as.Date("2004-07-01")) %>% pull(unemp_rate)
-tx_post <- tx_data %>% filter(date >= as.Date("2004-07-01")) %>% pull(unemp_rate)
-
-ca_diff <- mean(ca_post) - mean(ca_pre)
-tx_diff <- mean(tx_post) - mean(tx_pre)
-did_estimate <- ca_diff - tx_diff
-
-cat("California change:", round(ca_diff, 3), "%\n")
-cat("Texas change:", round(tx_diff, 3), "%\n")
-cat("Difference-in-Differences estimate:", round(did_estimate, 3), "%\n")
+install.packages("zoo")
 ```
 
 ```{r}
-#| label: chi-square-test
+library(zoo)
+# Variable 1: California unemployment rate
+# Create complete time series with all months
+all_months <- expand.grid(
+  YEAR = 1999:2009,
+  MONTH = 1:12
+)
 
-# Chi-square test: Employment status × Policy period
-chi_data <- df %>%
-  filter(state_name == "California") %>%
-  mutate(
-    emp_status = case_when(
-      employed == 1 ~ "Employed",
-      unemployed == 1 ~ "Unemployed",
-      TRUE ~ "Not in LF"
-    )
-  )
+ca_ts_complete <- all_months %>%
+  left_join(ca_data %>% select(YEAR, MONTH, unemp_rate), 
+            by = c("YEAR", "MONTH")) %>%
+  arrange(YEAR, MONTH)
 
-chi_table <- table(chi_data$emp_status, chi_data$policy_period)
-print(chi_table)
+# Check for missing values
+print("=== TIME SERIES DATA CHECK ===")
+print(paste("Total months expected:", nrow(ca_ts_complete)))
+print(paste("Months with data:", sum(!is.na(ca_ts_complete$unemp_rate))))
+print(paste("Missing months:", sum(is.na(ca_ts_complete$unemp_rate))))
 
-chi_result <- chisq.test(chi_table)
-print(chi_result)
-```
-
-```{r}
-#| label: anova-test
-
-# ANOVA: Compare unemployment across multiple time periods
-ca_data <- ca_data %>%
-  mutate(
-    period = case_when(
-      date < as.Date("2002-01-01") ~ "Period 1 (1999-2001)",
-      date >= as.Date("2002-01-01") & date < as.Date("2004-07-01") ~ "Period 2 (2002-Jun 2004)",
-      date >= as.Date("2004-07-01") & date < as.Date("2006-07-01") ~ "Period 3 (Jul 2004-2006)",
-      date >= as.Date("2006-07-01") ~ "Period 4 (2007-2009)"
-    )
-  )
-
-anova_result <- aov(unemp_rate ~ period, data = ca_data)
-summary(anova_result)
-
-# Post-hoc test (Tukey HSD)
-tukey_result <- TukeyHSD(anova_result)
-print(tukey_result)
-```
-
-```{r}
-#| label: kruskal-wallis
-
-# Non-parametric alternative: Kruskal-Wallis test
-kruskal_result <- kruskal.test(unemp_rate ~ period, data = ca_data)
-print(kruskal_result)
-```
-
-### Bootstrap Analysis
-
-```{r}
-#| label: bootstrap-setup
-
-# Define function to calculate mean difference
-mean_diff_func <- function(data, indices) {
-  sampled_data <- data[indices, ]
-  pre <- sampled_data %>% filter(policy == 0)
-  post <- sampled_data %>% filter(policy == 1)
-  return(mean(post$unemp_rate) - mean(pre$unemp_rate))
+# If there are NAs, handle them
+if(sum(is.na(ca_ts_complete$unemp_rate)) > 0) {
+  print("Missing data detected. Applying linear interpolation...")
+  library(zoo)
+  ca_ts_complete$unemp_rate <- na.approx(ca_ts_complete$unemp_rate, na.rm = FALSE)
+  
+  # If still NAs at edges, use last observation carried forward/backward
+  ca_ts_complete$unemp_rate <- na.locf(ca_ts_complete$unemp_rate, na.rm = FALSE)
+  ca_ts_complete$unemp_rate <- na.locf(ca_ts_complete$unemp_rate, fromLast = TRUE, na.rm = FALSE)
 }
 
-# Perform bootstrap (1000 replications)
-set.seed(123)
-boot_results <- boot(data = ca_data, 
-                     statistic = mean_diff_func, 
-                     R = 1000)
+ca_ts_obj <- ts(ca_ts_complete$unemp_rate, start = c(1999, 1), frequency = 12)
 
-print(boot_results)
-```
+# Variable 2: Control states average unemployment rate (PA + VA)
+control_ts_complete <- all_months %>%
+  left_join(
+    monthly_unemp %>%
+      filter(treatment == 0) %>%
+      group_by(YEAR, MONTH) %>%
+      summarise(avg_rate = mean(unemp_rate, na.rm = TRUE), .groups = "drop"),
+    by = c("YEAR", "MONTH")
+  ) %>%
+  arrange(YEAR, MONTH)
 
-```{r}
-#| label: bootstrap-ci
+# Handle NAs in control series
+if(sum(is.na(control_ts_complete$avg_rate)) > 0) {
+  control_ts_complete$avg_rate <- na.approx(control_ts_complete$avg_rate, na.rm = FALSE)
+  control_ts_complete$avg_rate <- na.locf(control_ts_complete$avg_rate, na.rm = FALSE)
+  control_ts_complete$avg_rate <- na.locf(control_ts_complete$avg_rate, fromLast = TRUE, na.rm = FALSE)
+}
 
-# Get bootstrap confidence intervals
-boot_ci_perc <- boot.ci(boot_results, type = "perc")
-boot_ci_bca <- boot.ci(boot_results, type = "bca")
+control_ts_obj <- ts(control_ts_complete$avg_rate, start = c(1999, 1), frequency = 12)
 
-print(boot_ci_perc)
-print(boot_ci_bca)
-```
+# Time Series EDA
+par(mfrow = c(2, 2))
 
-```{r}
-#| label: fig-bootstrap-dist
-#| fig-cap: "Bootstrap Distribution of Mean Difference"
+# Plot 1: Time series
+plot(ca_ts_obj, main = "CA Unemployment Rate", 
+     ylab = "Rate", xlab = "Year", col = "blue", lwd = 2)
+abline(v = 2004, col = "red", lty = 2, lwd = 2)
+legend("topleft", legend = "Policy: 2004", col = "red", lty = 2)
 
-# Plot bootstrap distribution
-hist(boot_results$t, breaks = 30, 
-     main = "Bootstrap Distribution of Mean Difference",
-     xlab = "Unemployment Rate Difference (Post - Pre)",
-     col = "lightblue", border = "white")
-abline(v = boot_results$t0, col = "red", lwd = 2)
-legend("topright", legend = "Observed Difference", 
-       col = "red", lwd = 2)
-```
+plot(control_ts_obj, main = "Control States (PA + VA) Avg Unemployment", 
+     ylab = "Rate", xlab = "Year", col = "darkgreen", lwd = 2)
+abline(v = 2004, col = "red", lty = 2, lwd = 2)
 
-### Time Series Analysis
+# Plot 2: ACF and PACF
+acf(ca_ts_obj, main = "CA ACF", na.action = na.pass)
+pacf(ca_ts_obj, main = "CA PACF", na.action = na.pass)
 
-```{r}
-#| label: ts-decomposition
+# Test for stationarity
+print("=== AUGMENTED DICKEY-FULLER TEST (Stationarity) ===")
+adf_ca <- adf.test(ca_ts_obj)
+print("California:")
+print(adf_ca)
 
-# Convert to time series object
-ca_ts <- ts(ca_data$unemp_rate, 
-            start = c(1999, 1), 
-            frequency = 12)
+adf_control <- adf.test(control_ts_obj)
+print("Control States:")
+print(adf_control)
 
-# Decompose time series
-decomp <- decompose(ca_ts)
-plot(decomp)
-```
+# Decomposition (only if no NAs remain)
+if(!any(is.na(ca_ts_obj))) {
+  par(mfrow = c(1, 1))
+  ca_decomp <- decompose(ca_ts_obj)
+  plot(ca_decomp)
+} else {
+  print("Skipping decomposition due to remaining NAs")
+  par(mfrow = c(1, 1))
+}
 
-```{r}
-#| label: fig-acf-pacf
-#| fig-cap: "ACF and PACF Plots"
+# ARIMA Modeling for CA unemployment
+# Auto ARIMA
+ca_arima <- auto.arima(ca_ts_obj, seasonal = TRUE, stepwise = FALSE)
+print("=== ARIMA MODEL: CA Unemployment (without intervention) ===")
+summary(ca_arima)
 
-# ACF and PACF plots
-par(mfrow = c(1, 2))
-acf(ca_ts, main = "ACF: CA Unemployment Rate")
-pacf(ca_ts, main = "PACF: CA Unemployment Rate")
-```
-
-```{r}
-#| label: stationarity-test
-
-# Test for stationarity (Augmented Dickey-Fuller test)
-adf_result <- adf.test(ca_ts)
-print(adf_result)
-
-# Test differenced series if needed
-ca_ts_diff <- diff(ca_ts)
-adf_diff <- adf.test(ca_ts_diff)
-cat("\nADF test on differenced series:\n")
-print(adf_diff)
-```
-
-```{r}
-#| label: arima-model
-
-# Fit ARIMA model to pre-policy period
-pre_policy_ts <- window(ca_ts, end = c(2004, 6))
-
-# Auto ARIMA model selection
-arima_model <- auto.arima(pre_policy_ts, 
-                          seasonal = TRUE,
-                          stepwise = FALSE,
-                          approximation = FALSE)
-summary(arima_model)
-```
-
-```{r}
-#| label: arima-diagnostics
-
-# Check model diagnostics
-checkresiduals(arima_model)
+# Model diagnostics
+checkresiduals(ca_arima)
 
 # Ljung-Box test for residual autocorrelation
-ljung_box <- Box.test(residuals(arima_model), lag = 12, type = "Ljung-Box")
+ljung_box <- Box.test(residuals(ca_arima), lag = 20, type = "Ljung-Box")
+print("=== LJUNG-BOX TEST (Residual Autocorrelation) ===")
 print(ljung_box)
+
+# Forecast
+ca_forecast <- forecast(ca_arima, h = 12)
+plot(ca_forecast, main = "CA Unemployment Forecast (12 months ahead)")
+
+# ARIMA with intervention (policy dummy for 2004)
+# Create external regressor for policy intervention
+policy_dummy <- ifelse(time(ca_ts_obj) >= 2004, 1, 0)
+
+ca_arima_intervention <- auto.arima(ca_ts_obj, xreg = policy_dummy)
+print("=== ARIMA WITH INTERVENTION VARIABLE (2004 Policy) ===")
+summary(ca_arima_intervention)
+
+# Compare models
+print("=== MODEL COMPARISON ===")
+print(paste("AIC - No intervention:", round(AIC(ca_arima), 2)))
+print(paste("AIC - With intervention:", round(AIC(ca_arima_intervention), 2)))
+print(paste("BIC - No intervention:", round(BIC(ca_arima), 2)))
+print(paste("BIC - With intervention:", round(BIC(ca_arima_intervention), 2)))
+
+# Cross-correlation between CA and Control
+par(mfrow = c(1, 1))
+ccf(ca_ts_obj, control_ts_obj, 
+    main = "Cross-correlation: CA vs Control (PA + VA)")
+
 ```
 
 ```{r}
-#| label: fig-arima-forecast
-#| fig-cap: "ARIMA Forecast vs Actual Unemployment"
+# DiD regression model
+did_model <- lm(unemp_rate ~ treatment + post_policy + treatment:post_policy,
+                data = monthly_unemp)
 
-# Forecast post-policy period
-forecast_horizon <- length(ca_ts) - length(pre_policy_ts)
-arima_forecast <- forecast(arima_model, h = forecast_horizon)
+print("=== DIFFERENCE-IN-DIFFERENCES REGRESSION (2004 cutoff) ===")
+print("The treatment:post_policy coefficient is the DiD estimate")
+summary(did_model)
 
-# Plot actual vs forecasted
-plot(arima_forecast, main = "ARIMA Forecast vs Actual")
-lines(ca_ts, col = "red", lwd = 2)
-legend("topleft", legend = c("Forecast", "Actual"), 
-       col = c("blue", "red"), lwd = 2)
+# Check regression assumptions
+par(mfrow = c(2, 2))
+plot(did_model)
+
+# Robust standard errors (if heteroskedasticity detected)
+library(sandwich)
+library(lmtest)
+print("=== ROBUST STANDARD ERRORS ===")
+coeftest(did_model, vcov = vcovHC(did_model, type = "HC1"))
+
+# ==========================================
+# SUMMARY VISUALIZATIONS
+# ==========================================
+
+# Trend plot by state
+ggplot(monthly_unemp, aes(x = year_month, y = unemp_rate, 
+                          color = state_name, linetype = state_name)) +
+  geom_line(linewidth = 1) +
+  geom_vline(xintercept = as.Date("2004-01-01"), 
+             linetype = "dashed", color = "red", linewidth = 1) +
+  annotate("text", x = as.Date("2004-01-01"), y = max(monthly_unemp$unemp_rate),
+           label = "Policy: 2004", hjust = -0.1, size = 4, color = "red") +
+  labs(title = "Unemployment Rates: CA, PA, and VA (1999-2009)",
+       subtitle = "Women aged 24-44 | Policy Implementation: 2004",
+       x = "Date", y = "Unemployment Rate",
+       color = "State", linetype = "State") +
+  scale_color_manual(values = c("California" = "blue", 
+                                "Pennsylvania" = "darkgreen", 
+                                "Virginia" = "purple")) +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        plot.title = element_text(face = "bold", size = 14))
+
+# Box plot comparison
+ggplot(monthly_unemp, aes(x = state_name, y = unemp_rate, 
+                          fill = factor(post_policy))) +
+  geom_boxplot() +
+  labs(title = "Unemployment Rate Distribution by State and Period",
+       subtitle = "Pre-policy: 1999-2003 | Post-policy: 2004-2009",
+       x = "State", y = "Unemployment Rate",
+       fill = "Period") +
+  scale_fill_manual(values = c("0" = "lightblue", "1" = "coral"),
+                    labels = c("Pre-Policy (1999-2003)", "Post-Policy (2004-2009)")) +
+  theme_minimal()
+
+# Summary statistics table
+summary_stats <- monthly_unemp %>%
+  group_by(state_name, post_policy) %>%
+  summarise(
+    mean_unemp = mean(unemp_rate),
+    sd_unemp = sd(unemp_rate),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(period = ifelse(post_policy == 0, "Pre (1999-2003)", "Post (2004-2009)"))
+
+print("=== SUMMARY STATISTICS ===")
+print(summary_stats)
+
+print("========================================")
+print("ANALYSIS COMPLETE!")
+print("Policy Implementation Year: 2004")
+print("Pre-policy period: 1999-2003")
+print("Post-policy period: 2004-2009")
+print("========================================")
 ```
 
-```{r}
-#| label: forecast-error
-
-# Calculate forecast error (actual - predicted)
-post_policy_ts <- window(ca_ts, start = c(2004, 7))
-forecast_error <- post_policy_ts - arima_forecast$mean
-
-cat("Average forecast error (policy effect):", round(mean(forecast_error), 3), "%\n")
-cat("Median forecast error:", round(median(forecast_error), 3), "%\n")
-```
-
-### Intervention Analysis
-
-```{r}
-#| label: arima-intervention
-
-# Create policy dummy variable
-policy_dummy <- c(rep(0, length(pre_policy_ts)), 
-                  rep(1, length(post_policy_ts)))
-
-# Fit ARIMA model with policy intervention
-arima_intervention <- auto.arima(ca_ts, 
-                                 xreg = policy_dummy,
-                                 seasonal = TRUE)
-summary(arima_intervention)
-
-cat("\nPolicy effect coefficient:", 
-    round(coef(arima_intervention)["policy_dummy"], 3), "%\n")
-```
-
-```{r}
-#| label: structural-break
-
-# Test for structural break using Chow test
-library(strucchange)
-sctest_result <- sctest(ca_ts ~ time(ca_ts), 
-                        type = "Chow", 
-                        point = length(pre_policy_ts))
-print(sctest_result)
-```
-
-```{r}
-#| label: step-trend-model
-
-# Test for immediate vs gradual effect
-step_var <- policy_dummy
-trend_var <- c(rep(0, length(pre_policy_ts)), 
-               1:length(post_policy_ts))
-
-arima_step_trend <- auto.arima(ca_ts, 
-                               xreg = cbind(step_var, trend_var))
-summary(arima_step_trend)
-```
-
-### Robustness Checks
-
-```{r}
-#| label: robustness-shorter-window
-
-# Robustness: Exclude 2007-2009 to avoid pre-recession effects
-ca_data_short <- ca_data %>% filter(YEAR <= 2006)
-
-pre_short <- ca_data_short %>% filter(policy == 0)
-post_short <- ca_data_short %>% filter(policy == 1)
-
-t_robust <- t.test(pre_short$unemp_rate, post_short$unemp_rate, var.equal = FALSE)
-cat("Robustness check (excluding 2007-2009):\n")
-print(t_robust)
-```
-
-```{r}
-#| label: placebo-test
-
-# Placebo test: "Fake" policy date at July 2002
-ca_data_placebo <- ca_data %>%
-  filter(YEAR <= 2003) %>%
-  mutate(fake_policy = ifelse(date >= as.Date("2002-07-01"), 1, 0))
-
-placebo_test <- t.test(unemp_rate ~ fake_policy, data = ca_data_placebo)
-cat("Placebo test (fake policy in July 2002):\n")
-print(placebo_test)
-```
+### Robustness checks: Accounting for national shifts in the labor market
